@@ -1,14 +1,20 @@
 package scalajsplayground
 
 import cats.effect.IO
+import com.raquo.domtypes.jsdom.defs.events.TypedTargetEvent
 import com.raquo.laminar.api.L
 import com.raquo.laminar.api.L._
-import com.raquo.laminar.nodes.ReactiveChildNode
+import com.raquo.laminar.nodes.{ReactiveChildNode, ReactiveHtmlElement}
 import io.circe._
 import io.circe.generic.semiauto._
 import io.circe.parser._
 import org.scalajs.dom
 import org.scalajs.dom.ext.Ajax
+
+import language.experimental.macros
+import magnolia._
+import org.scalajs.dom.html
+
 
 class InputBox(val node: Div, val inputNode: Input)
 
@@ -38,30 +44,42 @@ case object FetchPost extends AppActions
 case class PostResponse(res: Either[Throwable, Post]) extends AppActions
 
 
+class InputGroup(state: Signal[AppState], bus: WriteBus[AppActions], preTexts: List[String], onInputF: String => AppActions) {
+  def render(): ReactiveHtmlElement[html.Div] = {
+    div(
+      className := "input-group",
+      div(
+        className := "input-group-prepend",
+        preTexts.map(text =>
+          span(
+            className := "input-group-text",
+            text
+          )
+        )
+      ),
+      input(
+        className := "form-control",
+        inContext(thisNode => onInput.mapTo(onInputF.apply(thisNode.ref.value)) --> bus),
+        typ := "text"
+      )
+    )
+  }
+}
+
+
 
 object V2 extends ElmApp[AppState, AppActions](dom.document.querySelector("#app"), AppState.initial()) {
   override def view(stateStream: L.Signal[AppState], bus: L.WriteBus[AppActions]): ReactiveChildNode[dom.Element] = div(
+    className := "container",
     h1(
       onClick.mapTo(HeaderClick) --> bus,
       "Clickme"
     ),
     h1("User Welcomer 9000"),
+    new InputGroup(stateStream, bus, List("Please state your name"), str => NameUpdated(str)).render(),
+    new InputGroup(stateStream, bus, List("Please state your occupation"), str => OccupationChanged(str)).render(),
     div(
-      "Please state your name: ",
-      input(
-        inContext(thisNode => onInput.mapTo(NameUpdated(thisNode.ref.value)) --> bus),
-        typ := "text"
-      )
-    ),
-    div(
-      "Please state your occupation: ",
-      input(
-        inContext(thisNode => onInput.mapTo(OccupationChanged(thisNode.ref.value)) --> bus),
-        typ := "text"
-      )
-    ),
-    div(
-      "Please accept our greeting: ",
+      "PLEASE accept our greeting: ",
       div(
         fontSize := "20px",
         color <-- stateStream.map { state =>
@@ -118,7 +136,8 @@ abstract class ElmApp[S, A](container: dom.Element, initialState: S) {
     val stateStream = actionBus.events.fold(initialState){ (state, action) =>
       val (newState, effects) = update(state, action)
       effects.foreach(_.unsafeRunAsync {
-        case Left(_) => {}
+        case Left(error) =>
+          error.printStackTrace()
         case Right(generatedAction) =>
           actionBus.writer.onNext(generatedAction)
       })

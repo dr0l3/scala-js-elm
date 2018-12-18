@@ -10,7 +10,7 @@ module.exports.devServer = {
            Path.resolve(rootDir, 'assets') // project root containing index.html
     ],
     watchContentBase: true,
-    hot: false,
-    hotOnly: false, // only reload when build is successful
+    hot: true,
+    hotOnly: true, // only reload when build is successful
     inline: true // live reloading
 };

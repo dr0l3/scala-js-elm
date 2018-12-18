@@ -8,6 +8,7 @@ val circeVersion = "0.10.0"
 libraryDependencies ++= Seq(
   "com.raquo" %%% "laminar" % "0.5",
   "org.typelevel" %%% "cats-effect" % "1.1.0",
+  "com.propensive" %%% "magnolia" % "0.10.0",
   "org.scalatest" %%% "scalatest" % "3.0.5" % Test
 ) ++ Seq(
   "io.circe" %%% "circe-core",
