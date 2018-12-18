@@ -1,17 +1,14 @@
 package scalajsplayground
 
 import cats.effect.IO
+import com.raquo.laminar.api.L
 import com.raquo.laminar.api.L._
 import com.raquo.laminar.nodes.ReactiveChildNode
-import org.scalajs.dom
-import org.scalajs.dom.ext.Ajax
 import io.circe._
 import io.circe.generic.semiauto._
 import io.circe.parser._
-import io.circe.syntax._
-
-import scala.scalajs.js
-import scala.util.Success
+import org.scalajs.dom
+import org.scalajs.dom.ext.Ajax
 
 class InputBox(val node: Div, val inputNode: Input)
 
@@ -40,30 +37,86 @@ case object HeaderClick extends AppActions
 case object FetchPost extends AppActions
 case class PostResponse(res: Either[Throwable, Post]) extends AppActions
 
-object Scalajsplayground {
-  def stateUpdater(appState: AppState, actions: AppActions): (AppState, List[IO[AppActions]]) = {
-    val res = actions match {
-      case NameUpdated(updatedName) => (appState.copy(name = updatedName), Nil)
-      case OccupationChanged(updated) => (appState.copy(occupation = updated), Nil)
-      case HeaderClick => (appState.copy(clicks = appState.clicks + 1), Nil)
-      case FetchPost => (appState, List(IO.fromFuture(IO(Ajax.get(s"http://jsonplaceholder.typicode.com/posts/${appState.clicks}"))).map { resp =>
+
+
+object V2 extends ElmApp[AppState, AppActions](dom.document.querySelector("#app"), AppState.initial()) {
+  override def view(stateStream: L.Signal[AppState], bus: L.WriteBus[AppActions]): ReactiveChildNode[dom.Element] = div(
+    h1(
+      onClick.mapTo(HeaderClick) --> bus,
+      "Clickme"
+    ),
+    h1("User Welcomer 9000"),
+    div(
+      "Please state your name: ",
+      input(
+        inContext(thisNode => onInput.mapTo(NameUpdated(thisNode.ref.value)) --> bus),
+        typ := "text"
+      )
+    ),
+    div(
+      "Please state your occupation: ",
+      input(
+        inContext(thisNode => onInput.mapTo(OccupationChanged(thisNode.ref.value)) --> bus),
+        typ := "text"
+      )
+    ),
+    div(
+      "Please accept our greeting: ",
+      div(
+        fontSize := "20px",
+        color <-- stateStream.map { state =>
+          if (state.name == "Rune") "red" else "black"
+        },
+        strong("Hello, "),
+        child.text <-- stateStream.map(_.name),
+      )
+    ),
+    div(
+      child.text <-- stateStream.map { state =>
+        if (state.occupation.isEmpty) "" else s"Nice to see a fellow ${state.occupation}"
+      }
+    ),
+    div(
+      child.text <-- stateStream.map(_.clicks.toString)
+    ),
+    h1(
+      "Send stuff",
+      onClick.mapTo(FetchPost) --> bus
+    ),
+    div(
+      child.text <-- stateStream.map { state =>
+        state.lastResponse.fold("No response")(post => post.toString)
+      }
+    )
+  )
+
+  override def update(state: AppState, action: AppActions): (AppState, List[IO[AppActions]]) = {
+    action match {
+      case NameUpdated(updatedName) => (state.copy(name = updatedName), Nil)
+      case OccupationChanged(updated) => (state.copy(occupation = updated), Nil)
+      case HeaderClick => (state.copy(clicks = state.clicks + 1), Nil)
+      case FetchPost => (state, List(IO.fromFuture(IO(Ajax.get(s"http://jsonplaceholder.typicode.com/posts/${state.clicks}"))).map { resp =>
         implicit val fooDecoder: Decoder[Post] = deriveDecoder[Post]
 
         PostResponse(decode[Post](resp.responseText))
       }))
       case PostResponse(either) =>
-        (appState.copy(lastResponse = either.toOption), Nil)
+        (state.copy(lastResponse = either.toOption), Nil)
     }
-    println(s"($appState, $actions) -> ${res}")
-    res
   }
 
+  override def subs(subs: List[L.EventStream[AppActions]]): Unit = {
+
+  }
+}
+
+
+abstract class ElmApp[S, A](container: dom.Element, initialState: S) {
   def main(args: Array[String]): Unit = {
+    val actionBus = new EventBus[A]
 
-    val actionBus = new EventBus[AppActions]
-
-    val stateStream: Signal[AppState] = actionBus.events.fold(AppState.initial()){ (state, action) =>
-      val (newState, effects) = stateUpdater(state, action)
+    val stateStream = actionBus.events.fold(initialState){ (state, action) =>
+      val (newState, effects) = update(state, action)
       effects.foreach(_.unsafeRunAsync {
         case Left(_) => {}
         case Right(generatedAction) =>
@@ -72,64 +125,11 @@ object Scalajsplayground {
       newState
     }
 
-    val appDiv = div(
-      h1(
-        onClick.mapTo(HeaderClick) --> actionBus.writer,
-        "Clickme"
-      ),
-      h1("User Welcomer 9000"),
-      div(
-        "Please state your name: ",
-        input(
-          inContext(thisNode => onInput.mapTo(NameUpdated(thisNode.ref.value)) --> actionBus.writer),
-          typ := "text"
-        )
-      ),
-      div(
-        "Please state your occupation: ",
-        input(
-          inContext(thisNode => onInput.mapTo(OccupationChanged(thisNode.ref.value)) --> actionBus.writer),
-          typ := "text"
-        )
-      ),
-      div(
-        "Please accept our greeting: ",
-        div(
-          fontSize := "20px",
-          color <-- stateStream.map { state =>
-            if (state.name == "Rune") "red" else "black"
-          },
-          strong("Hello, "),
-          child.text <-- stateStream.map(_.name),
-        )
-      ),
-      div(
-        child.text <-- stateStream.map { state =>
-          if (state.occupation.isEmpty) "" else s"Nice to see a fellow ${state.occupation}"
-        }
-      ),
-      div(
-        child.text <-- stateStream.map(_.clicks.toString)
-      ),
-      h1(
-        "Send stuff",
-        onClick.mapTo(FetchPost) --> actionBus.writer
-      ),
-      div(
-        child.text <-- stateStream.map { state =>
-          state.lastResponse.fold("No response")(post => post.toString)
-        }
-      )
-    )
-
-    render(dom.document.querySelector("#app"), appDiv)
+    render(container, view(stateStream, actionBus.writer))
   }
 
-}
 
-
-object Stuff {
-  def view[S, A](state: S, bus: WriteBus[A]): ReactiveChildNode[dom.Element] = ???
-  def update[S,A](state: S, action: A): (S, List[IO[A]]) = ???
-  def subs[A](subs: List[EventStream[A]]): Unit = ???
+  def view(stateStream: Signal[S], bus: WriteBus[A]): ReactiveChildNode[dom.Element]
+  def update(state: S, action: A): (S, List[IO[A]])
+  def subs(subs: List[EventStream[A]]): Unit
 }
